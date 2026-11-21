@@ -31,7 +31,8 @@ public class MainActivity extends Activity {
     private final ArrayDeque<String> undo=new ArrayDeque<>(), redo=new ArrayDeque<>();
     private LinearLayout root, body, listing, toolbar;
     private EditText editor;
-    private TextView title,status,lines;
+    private TextView brand,title,status,lines;
+    private int layoutClass=-1;
     private boolean editingInternally=false, busy=false;
     private String mode="files";
 
@@ -51,23 +52,35 @@ public class MainActivity extends Activity {
     private LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
     private GradientDrawable rounded(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     private TextView label(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);return t;}
-    private Button button(String s,Runnable run){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextSize(12);b.setTextColor(TEXT);b.setMinHeight(dp(44));b.setMinimumHeight(dp(44));b.setMinWidth(0);b.setPadding(dp(10),0,dp(10),0);b.setBackgroundTintList(ColorStateList.valueOf(PANEL));b.setOnClickListener(v->run.run());return b;}
+    private Button button(String s,Runnable run){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextSize(12);b.setTextColor(TEXT);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(4),0,dp(4),0);b.setMaxLines(2);b.setGravity(Gravity.CENTER);b.setBackgroundTintList(ColorStateList.valueOf(PANEL));b.setOnClickListener(v->run.run());return b;}
     private void addButton(LinearLayout r,String s,Runnable run){r.addView(button(s,run),new LinearLayout.LayoutParams(0,dp(48),1));}
     private void build(){
         root=column();root.setBackgroundColor(BG);root.setPadding(dp(12),dp(8),dp(12),dp(8));setContentView(root);
-        TextView brand=label("✦  ANTIGRAVITY / MOBILE",11,BLUE);brand.setLetterSpacing(.10f);root.addView(brand);
+        brand=label("✦  ANTIGRAVITY / MOBILE",11,BLUE);brand.setLetterSpacing(.10f);root.addView(brand);
         title=label("Workspace",26,TEXT);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        status=label("Choose a project folder to begin",12,MUTED);status.setPadding(0,dp(5),0,dp(8));root.addView(status);
+        status=label("Choose a project folder to begin",12,MUTED);status.setPadding(0,dp(5),0,dp(8));status.setMaxLines(2);status.setEllipsize(TextUtils.TruncateAt.END);root.addView(status);
         toolbar=row();addButton(toolbar,"Files",this::showFiles);addButton(toolbar,"Editor",this::showEditor);addButton(toolbar,"Assistant",this::showAssistant);root.addView(toolbar);
         body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));
+        root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(r-l!=or-ol||b-t!=ob-ot)adaptLayout();});
         editor=new EditText(this);editor.setTextColor(TEXT);editor.setTypeface(Typeface.MONOSPACE);editor.setTextSize(14);editor.setGravity(Gravity.TOP|Gravity.START);
         editor.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        editor.setHorizontallyScrolling(true);editor.setPadding(dp(8),dp(10),dp(8),dp(10));editor.setBackgroundColor(BG);
+        editor.setHorizontallyScrolling(false);editor.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI);editor.setPadding(dp(8),dp(10),dp(8),dp(10));editor.setBackgroundColor(BG);
         editor.addTextChangedListener(new TextWatcher(){
             public void beforeTextChanged(CharSequence s,int st,int c,int a){if(!editingInternally){if(undo.size()>=80)undo.removeFirst();undo.addLast(s.toString());redo.clear();}}
             public void onTextChanged(CharSequence s,int st,int before,int count){refreshEditorStatus(); if(lines!=null) updateLines();}
             public void afterTextChanged(Editable e){}
         });
+    }
+    private void adaptLayout(){
+        int h=root.getHeight(),w=root.getWidth();if(h<=0||w<=0)return;
+        int next=h<dp(260)?2:h<dp(510)?1:0;
+        if(next==layoutClass)return;layoutClass=next;
+        brand.setVisibility(next==0?View.VISIBLE:View.GONE);
+        title.setVisibility(next==0?View.VISIBLE:View.GONE);
+        status.setMaxLines(next==0?2:1);
+        status.setPadding(0,dp(2),0,dp(next==0?8:2));
+        toolbar.setVisibility(next==2?View.GONE:View.VISIBLE);
+        root.setPadding(dp(8),dp(next==0?8:2),dp(8),dp(next==0?8:2));
     }
     private void detach(View v){if(v.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)v.getParent()).removeView(v);}
     private void clear(String m,String header){ mode=m;detach(editor);body.removeAllViews();lines=null;title.setText(header); }
@@ -81,8 +94,9 @@ public class MainActivity extends Activity {
     private void pick(){guard(()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);startActivityForResult(i,PICK);});}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);if(request!=PICK||result!=RESULT_OK||data==null||data.getData()==null)return;
-        try{Uri chosen=data.getData();int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            getContentResolver().takePersistableUriPermission(chosen,flags);
+        try{Uri chosen=data.getData();int granted=data.getFlags();
+            if((granted&Intent.FLAG_GRANT_READ_URI_PERMISSION)==0||(granted&Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0)throw new SecurityException("Choose a folder with read and write access");
+            getContentResolver().takePersistableUriPermission(chosen,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             tree=chosen;getPreferences(0).edit().putString("tree",tree.toString()).apply();dirs.clear();names.clear();dirs.add(DocumentsContract.getTreeDocumentId(tree));names.add("Workspace");currentFile=null;saved="";loadText("");showFiles();
         }catch(Exception e){fail(e);}
     }
@@ -104,13 +118,14 @@ public class MainActivity extends Activity {
             if(entries.isEmpty())listing.addView(label("This folder is empty.",14,MUTED));
             for(Entry e:entries){
                 LinearLayout item=row();item.setBackground(rounded(PANEL,10));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(56));lp.bottomMargin=dp(5);listing.addView(item,lp);
-                TextView t=label((e.folder()?"▸  ":"·  ")+e.name,15,TEXT);t.setPadding(dp(12),0,0,0);item.addView(t,new LinearLayout.LayoutParams(0,-1,1));t.setGravity(Gravity.CENTER_VERTICAL);
+                TextView t=label((e.folder()?"▸  ":"·  ")+e.name,15,TEXT);t.setPadding(dp(12),0,0,0);item.addView(t,new LinearLayout.LayoutParams(0,-1,1));t.setGravity(Gravity.CENTER_VERTICAL);t.setMaxLines(2);t.setEllipsize(TextUtils.TruncateAt.END);
                 t.setOnClickListener(v->{if(e.folder()){dirs.add(e.id);names.add(e.name);showFiles();}else guard(()->open(e));});item.addView(button("⋯",()->entryMenu(e)),new LinearLayout.LayoutParams(dp(48),dp(48)));
             }
         }catch(Exception e){fail(e);}
     }
     private void askName(String title,String initial,java.util.function.Consumer<String> fn){
         EditText input=new EditText(this);input.setSingleLine(true);input.setText(initial);
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle(title).setView(input).setPositiveButton("OK",null).setNegativeButton("Cancel",null).create();
         dialog.setOnShowListener(v->dialog.getButton(-1).setOnClickListener(w->{String s=input.getText().toString().trim();if(s.isEmpty()||s.equals(".")||s.equals("..")||s.contains("/")||s.contains("\\")){input.setError("Enter a valid name");return;}dialog.dismiss();fn.accept(s);}));dialog.show();
     }
@@ -148,14 +163,15 @@ public class MainActivity extends Activity {
     }
     private void showAssistant(){
         clear("assistant","AI assistant");setStatus("Gemini API • only explicitly selected context is sent");
-        LinearLayout settings=row();addButton(settings,"API settings",this::apiSettings);body.addView(settings);
-        EditText prompt=new EditText(this);prompt.setTextColor(TEXT);prompt.setHint("Describe a code change or ask a question");prompt.setMinLines(3);body.addView(prompt,new LinearLayout.LayoutParams(-1,-2));
-        CheckBox include=new CheckBox(this);include.setText("Include open file ("+(currentFile==null?"none":currentName)+")");include.setTextColor(TEXT);include.setEnabled(currentFile!=null);body.addView(include);
-        TextView result=label("Connect your own API key to start.",15,TEXT);result.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.addView(result);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView page=new ScrollView(this);page.setFillViewport(true);LinearLayout assistant=column();page.addView(assistant,new ScrollView.LayoutParams(-1,-2));body.addView(page,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout settings=row();addButton(settings,"API settings",this::apiSettings);assistant.addView(settings);
+        EditText prompt=new EditText(this);prompt.setTextColor(TEXT);prompt.setHint("Describe a code change or ask a question");prompt.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);prompt.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI);prompt.setMinLines(2);prompt.setMaxLines(5);assistant.addView(prompt,new LinearLayout.LayoutParams(-1,-2));
+        CheckBox include=new CheckBox(this);include.setText("Include open file ("+(currentFile==null?"none":currentName)+")");include.setTextColor(TEXT);include.setEnabled(currentFile!=null);assistant.addView(include);
+        TextView result=label("Connect your own API key to start.",15,TEXT);result.setTextIsSelectable(true);result.setPadding(dp(12),dp(12),dp(12),dp(12));result.setBackground(rounded(PANEL,10));result.setMinHeight(dp(120));
         Button send=button("Send request",()->{});send.setOnClickListener(v->{if(apiKey.isEmpty()){apiSettings();return;}if(prompt.getText().toString().trim().isEmpty()){prompt.setError("Enter a prompt");return;}String input=prompt.getText().toString();boolean attach=include.isChecked()&&currentFile!=null;String source=attach?editor.getText().toString():"";String name=currentName;
             Runnable call=()->requestAi(input+(attach?"\n\nOpen file: "+name+"\n"+source:""),result,send);
             if(attach)new AlertDialog.Builder(this).setTitle("Send file to Gemini?").setMessage("The open file will be transmitted to Google's Gemini API. Remove secrets before continuing.").setPositiveButton("Send",(d,w)->call.run()).setNegativeButton("Cancel",null).show();else call.run();
-        });body.addView(send);body.addView(button("Replace editor with response",()->{if(currentFile==null||!Boolean.TRUE.equals(result.getTag()))return;new AlertDialog.Builder(this).setTitle("Replace open file?").setMessage("Review output before saving. This replaces the editor buffer, not the disk file.").setNegativeButton("Cancel",null).setPositiveButton("Replace",(d,w)->{editor.setText(result.getText());showEditor();}).show();}));
+        });assistant.addView(send);assistant.addView(button("Replace editor with response",()->{if(currentFile==null||!Boolean.TRUE.equals(result.getTag()))return;new AlertDialog.Builder(this).setTitle("Replace open file?").setMessage("Review output before saving. This replaces the editor buffer, not the disk file.").setNegativeButton("Cancel",null).setPositiveButton("Replace",(d,w)->{editor.setText(result.getText());showEditor();}).show();}));assistant.addView(result,new LinearLayout.LayoutParams(-1,-2));
     }
     private void apiSettings(){
         LinearLayout form=column();form.setPadding(dp(20),0,dp(20),0);EditText key=new EditText(this);key.setHint("Gemini API key (session only)");key.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);key.setText(apiKey);form.addView(key);
