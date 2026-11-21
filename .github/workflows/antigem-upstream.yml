@@ -1,0 +1,63 @@
+name: AntiGem upstream ARM64 APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/antigem-upstream.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout pinned GPL upstream
+        uses: actions/checkout@v4
+        with:
+          repository: Santoshkurmi/antigem
+          ref: 76c949faada22095d1a68e640650e9e209d2c990
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch required submodule
+        run: git submodule update --init --depth 1 termux-am
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build ARM64 debug APK from upstream source
+        run: |
+          chmod +x gradlew scripts/build_all_apks.sh
+          ./scripts/build_all_apks.sh
+      - name: Verify APK signature and archive
+        run: |
+          set -euo pipefail
+          apk=$(find output -maxdepth 1 -name '*-debug.apk' -print -quit)
+          test -n "$apk"
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$signer" verify --verbose "$apk"
+          unzip -t "$apk" > /dev/null
+          sha256sum "$apk" > output/SHA256SUMS.txt
+          git rev-parse HEAD > output/UPSTREAM_COMMIT.txt
+          cp LICENSE output/UPSTREAM_LICENSE.txt
+          printf '%s\n' 'https://github.com/Santoshkurmi/antigem/tree/76c949faada22095d1a68e640650e9e209d2c990' > output/SOURCE_URL.txt
+      - name: Archive corresponding checked-out source
+        run: |
+          mkdir -p source-dist
+          git archive --format=tar HEAD | gzip > source-dist/antigem-source.tar.gz
+          git -C termux-am archive --format=tar HEAD | gzip > source-dist/termux-am-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AntiGem-upstream-ARM64-debug
+          path: |
+            output/*-debug.apk
+            output/SHA256SUMS.txt
+            output/UPSTREAM_COMMIT.txt
+            output/UPSTREAM_LICENSE.txt
+            output/SOURCE_URL.txt
+            source-dist/*
+          if-no-files-found: error
